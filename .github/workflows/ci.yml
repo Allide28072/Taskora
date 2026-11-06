@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Read-only: this workflow never writes to the repository.
+permissions:
+  contents: read
+
+# A new push supersedes the run still in flight for the same branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      # Run both versions even if one fails, so a green run is unambiguous.
+      fail-fast: false
+      matrix:
+        node:
+          # The oldest release where the built-in node:sqlite needs no
+          # --experimental-sqlite flag, i.e. the documented floor.
+          - '22.13'
+          # What we develop on.
+          - '24'
+
+    env:
+      # The suite boots its own throwaway database and refuses to run against
+      # anything else, so no service container or secret is required here.
+      CI: true
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build the client
+        run: npm run build
+
+      # The deployment path: one process serving the built client and the API.
+      # Its assertions mirror what the route table promises — assets and the SPA
+      # shell from dist/, JSON (never HTML) from /api and /media.
+      - name: Smoke test the production server
+        if: matrix.node == '24'
+        env:
+          NODE_ENV: production
+          PORT: '3001'
+          # Must stay project-relative: the server joins DATA_DIR onto the
+          # project root, so an absolute path would resolve to a broken one.
+          DATA_DIR: .data-ci
+          # The smoke test speaks plain HTTP, so the Secure cookie flag would
+          # make sign-in untestable.
+          COOKIE_SECURE: 'false'
+          SESSION_SECRET: ci-only-secret-never-used-outside-ci
+          ADMIN_EMAIL: ci-admin@example.com
+          ADMIN_PASSWORD: ci-admin-password-1
+          ADMIN_NAME: CI Admin
+        run: |
+          set -euo pipefail
+          node server/server.js > server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3001/api/health > /dev/null; then break; fi
+            if [ "$attempt" = 30 ]; then
+              echo "::error::server did not become healthy in 30s"; cat server.log; exit 1
+            fi
+            sleep 1
+          done
+
+          echo "health: $(curl -sf http://127.0.0.1:3001/api/health)"
+
+          # The built client must be served by this same process.
+          curl -sf http://127.0.0.1:3001/ | grep -q 'id="root"' \
+            || { echo "::error::/ did not serve the built client"; cat server.log; exit 1; }
+
+          # A client-side route resolves to the shell too.
+          curl -sf http://127.0.0.1:3001/movies | grep -q 'id="root"' \
+            || { echo "::error::/movies did not fall back to the SPA shell"; exit 1; }
+
+          # API and media must answer as JSON, never with the HTML shell.
+          for path in /api/nope /media/nope; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3001$path")
+            body=$(curl -s "http://127.0.0.1:3001$path")
+            [ "$code" = "404" ] || { echo "::error::$path returned $code, expected 404"; exit 1; }
+            case "$body" in
+              *'"error"'*) ;;
+              *) echo "::error::$path did not return a JSON error"; exit 1 ;;
+            esac
+          done
+
+          # Hashed assets are served with a long-lived immutable cache.
+          # -quit rather than a pipe to head: under `pipefail`, a find killed by
+          # SIGPIPE would fail the step.
+          asset=$(find dist/assets -name '*.js' -print -quit)
+          cache=$(curl -s -D - -o /dev/null "http://127.0.0.1:3001/${asset#dist/}" \
+            | grep -i '^cache-control:' | tr -d '\r')
+          case "$cache" in
+            *immutable*) ;;
+            *) echo "::error::assets are missing the immutable cache header (got: $cache)"; exit 1 ;;
+          esac
+
+          echo "production smoke test passed"

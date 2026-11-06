@@ -1,0 +1,40 @@
+{
+  "name": "the-flash",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "THE FLASH — cinematic streaming meets light-novel reading. Original app, original UI.",
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"node --watch server/server.js\" \"vite\"",
+    "dev:api": "node --watch server/server.js",
+    "dev:web": "vite",
+    "build": "npm run build:web && npm run build:api",
+    "build:web": "vite build",
+    "build:api": "echo 'API is runtime-only (node server/server.js)'",
+    "typecheck": "tsc --noEmit",
+    "start": "node server/server.js",
+    "seed": "node server/seed.js",
+    "admin": "node server/set-admin.js",
+    "test": "node tests/run-tests.mjs"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "jsonwebtoken": "^9.0.0",
+    "open": "^10.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "concurrently": "^9.0.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.6"
+  }
+}

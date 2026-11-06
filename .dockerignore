@@ -1,0 +1,12 @@
+# Keep the build context small and never bake local state into an image.
+node_modules
+dist
+data
+.git
+.gitignore
+.freebuff
+.env
+server/.env
+*.log
+README.md
+LICENSE

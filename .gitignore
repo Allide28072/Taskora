@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.env
+server/.env
+
+# Local database — created and seeded on first run, and it holds real accounts.
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.log
+
+.DS_Store
+Thumbs.db
+
+# Agent / editor scratch — not part of the project
+.freebuff/
